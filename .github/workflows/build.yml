@@ -103,51 +103,49 @@ jobs:
       matrix: ${{ steps.set.outputs.matrix }}
       build_start_time: ${{ steps.set.outputs.BUILD_START_TIME }}
     steps:
+      - name: Install jq
+        run: sudo apt-get install -y jq
+      
       - id: set
         run: |
-          sudo apt-get install -y jq
           BUILD_START_TIME=$(date --iso-8601=seconds)
           echo "BUILD_START_TIME=$BUILD_START_TIME" >> $GITHUB_ENV
           echo "BUILD_START_TIME=$BUILD_START_TIME" >> $GITHUB_OUTPUT
-        
+          
           # Handle ROM selection
           ROM="${{ github.event.inputs.ROM }}"
           if [[ "$ROM" == "AOSP" ]]; then
-            ROMS='["AOSP"]'
+            ROM_ARRAY=("AOSP")
           elif [[ "$ROM" == "MIUI" ]]; then
-            ROMS='["MIUI"]'
+            ROM_ARRAY=("MIUI")
           else
-            ROMS='["AOSP","MIUI"]'
+            ROM_ARRAY=("AOSP" "MIUI")
           fi
 
           # Handle kernel branch selection
           BRANCH="${{ github.event.inputs.kernel_branch }}"
           if [[ -z "$BRANCH" ]]; then
             echo "Fetching all branches from kernel repo..."
-            # Get branches and convert to JSON array
-            BRANCHES_JSON=$(git ls-remote --heads https://github.com/UdayKumarChunduru/Realking_kernel_sm8250.git | awk -F'/' '{print $NF}' | jq -R . | jq -s -c .)
-            echo "Fetched branches: $BRANCHES_JSON"
+            # Get branches into array
+            readarray -t BRANCH_ARRAY < <(git ls-remote --heads https://github.com/UdayKumarChunduru/Realking_kernel_sm8250.git | awk -F'/' '{print $NF}')
+            echo "Fetched branches: ${BRANCH_ARRAY[*]}"
           else
-            BRANCHES_JSON=$(jq -n -c --arg b "$BRANCH" '[$b]')
-            echo "Selected branch: $BRANCHES_JSON"
+            BRANCH_ARRAY=("$BRANCH")
+            echo "Selected branch: ${BRANCH_ARRAY[*]}"
           fi
 
-          echo "ROMs: $ROMS"
-          echo "Branches: $BRANCHES_JSON"
+          # Convert arrays to JSON format
+          ROMS_JSON=$(printf '%s\n' "${ROM_ARRAY[@]}" | jq -R . | jq -s -c .)
+          BRANCHES_JSON=$(printf '%s\n' "${BRANCH_ARRAY[@]}" | jq -R . | jq -s -c .)
 
-          # Create matrix using jq with compact output (-c)
-          MATRIX=$(jq -n -c --argjson r "$ROMS" --argjson b "$BRANCHES_JSON" '
-            {
-              include: [
-                $r[] as $rom |
-                $b[] as $branch |
-                {
-                  rom_type: $rom,
-                  kernel_branch: $branch
-                }
-              ]
-            }
-          ')
+          # Create proper matrix format for GitHub Actions
+          MATRIX=$(jq -n -c \
+            --argjson rom_types "$ROMS_JSON" \
+            --argjson kernel_branches "$BRANCHES_JSON" \
+            '{
+              rom_type: $rom_types,
+              kernel_branch: $kernel_branches
+            }')
 
           echo "Generated matrix: $MATRIX"
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
@@ -156,7 +154,7 @@ jobs:
     needs: set-matrix
     runs-on: ubuntu-latest
     strategy:
-      matrix: ${{ fromJson(needs.set-matrix.outputs.matrix).include }}
+      matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
     timeout-minutes: 120
     permissions:
       contents: write
