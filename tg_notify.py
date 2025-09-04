@@ -24,9 +24,10 @@ ZIP_PATH = os.getenv("ZIP_PATH", "")
 FAILURE_STAGE = os.getenv("FAILURE_STAGE", "")
 STEP_NUMBER = os.getenv("STEP_NUMBER", "")
 ERROR_CODE = os.getenv("ERROR_CODE", "")
+GITHUB_WORKSPACE = os.getenv("GITHUB_WORKSPACE", "/tmp")
 
-# State management - Unique file per matrix combination
-LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{KERNEL_BRANCH}.txt".replace("/", "_").replace(" ", "_")
+# State management - Use GitHub workspace for unique files per job
+LIVE_MESSAGE_ID_FILE = os.path.join(GITHUB_WORKSPACE, f"live_message_{ROM_TYPE}_{KERNEL_BRANCH}.txt".replace("/", "_").replace(" ", "_"))
 
 def telegram_api(method):
     return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
@@ -173,6 +174,8 @@ def delete_message(message_id):
 
 def save_message_id(message_id):
     try:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(LIVE_MESSAGE_ID_FILE), exist_ok=True)
         with open(LIVE_MESSAGE_ID_FILE, 'w') as f:
             f.write(str(message_id))
         print(f"Saved message ID {message_id} to {LIVE_MESSAGE_ID_FILE}")
@@ -245,6 +248,7 @@ def main():
     print(f"KERNEL_BRANCH: {KERNEL_BRANCH}")
     print(f"BUILD_STATUS: {BUILD_STATUS}")
     print(f"Message ID file: {LIVE_MESSAGE_ID_FILE}")
+    print(f"GitHub Workspace: {GITHUB_WORKSPACE}")
     
     if action == "start":
         # Send initial live message
