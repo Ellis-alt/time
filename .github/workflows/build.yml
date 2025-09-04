@@ -98,62 +98,59 @@ on:
 
 jobs:
   set-matrix:
-  runs-on: ubuntu-latest
-  outputs:
-    matrix: ${{ steps.set.outputs.matrix }}
-    build_start_time: ${{ steps.set.outputs.BUILD_START_TIME }}
-  steps:
-    - name: Install jq
-      run: sudo apt-get install -y jq
-      
-    - id: set
-      run: |
-        sudo apt-get install -y jq
-        BUILD_START_TIME=$(date --iso-8601=seconds)
-        echo "BUILD_START_TIME=$BUILD_START_TIME" >> $GITHUB_ENV
-        echo "BUILD_START_TIME=$BUILD_START_TIME" >> $GITHUB_OUTPUT
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      build_start_time: ${{ steps.set.outputs.BUILD_START_TIME }}
+    steps:
+      - id: set
+        run: |
+          sudo apt-get install -y jq
+          BUILD_START_TIME=$(date --iso-8601=seconds)
+          echo "BUILD_START_TIME=$BUILD_START_TIME" >> $GITHUB_ENV
+          echo "BUILD_START_TIME=$BUILD_START_TIME" >> $GITHUB_OUTPUT
         
-        # Handle ROM selection
-        ROM="${{ github.event.inputs.ROM }}"
-        if [[ "$ROM" == "AOSP" ]]; then
-          ROMS='["AOSP"]'
-        elif [[ "$ROM" == "MIUI" ]]; then
-          ROMS='["MIUI"]'
-        else
-          ROMS='["AOSP","MIUI"]'
-        fi
+          # Handle ROM selection
+          ROM="${{ github.event.inputs.ROM }}"
+          if [[ "$ROM" == "AOSP" ]]; then
+            ROMS='["AOSP"]'
+          elif [[ "$ROM" == "MIUI" ]]; then
+            ROMS='["MIUI"]'
+          else
+            ROMS='["AOSP","MIUI"]'
+          fi
 
-        # Handle kernel branch selection
-        BRANCH="${{ github.event.inputs.kernel_branch }}"
-        if [[ -z "$BRANCH" ]]; then
-          echo "Fetching all branches from kernel repo..."
-          # Get branches and convert to JSON array
-          BRANCHES_JSON=$(git ls-remote --heads https://github.com/UdayKumarChunduru/Realking_kernel_sm8250.git | awk -F'/' '{print $NF}' | jq -R . | jq -s -c .)
-          echo "Fetched branches: $BRANCHES_JSON"
-        else
-          BRANCHES_JSON=$(jq -n -c --arg b "$BRANCH" '[$b]')
-          echo "Selected branch: $BRANCHES_JSON"
-        fi
+          # Handle kernel branch selection
+          BRANCH="${{ github.event.inputs.kernel_branch }}"
+          if [[ -z "$BRANCH" ]]; then
+            echo "Fetching all branches from kernel repo..."
+            # Get branches and convert to JSON array
+            BRANCHES_JSON=$(git ls-remote --heads https://github.com/UdayKumarChunduru/Realking_kernel_sm8250.git | awk -F'/' '{print $NF}' | jq -R . | jq -s -c .)
+            echo "Fetched branches: $BRANCHES_JSON"
+          else
+            BRANCHES_JSON=$(jq -n -c --arg b "$BRANCH" '[$b]')
+            echo "Selected branch: $BRANCHES_JSON"
+          fi
 
-        echo "ROMs: $ROMS"
-        echo "Branches: $BRANCHES_JSON"
+          echo "ROMs: $ROMS"
+          echo "Branches: $BRANCHES_JSON"
 
-        # Create matrix using jq with compact output (-c)
-        MATRIX=$(jq -n -c --argjson r "$ROMS" --argjson b "$BRANCHES_JSON" '
-          {
-            include: [
-              $r[] as $rom |
-              $b[] as $branch |
-              {
-                rom_type: $rom,
-                kernel_branch: $branch
-              }
-            ]
-          }
-        ')
+          # Create matrix using jq with compact output (-c)
+          MATRIX=$(jq -n -c --argjson r "$ROMS" --argjson b "$BRANCHES_JSON" '
+            {
+              include: [
+                $r[] as $rom |
+                $b[] as $branch |
+                {
+                  rom_type: $rom,
+                  kernel_branch: $branch
+                }
+              ]
+            }
+          ')
 
-        echo "Generated matrix: $MATRIX"
-        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Generated matrix: $MATRIX"
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   build:
     needs: set-matrix
