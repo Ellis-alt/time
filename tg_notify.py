@@ -21,6 +21,9 @@ CURRENT_STAGE = os.getenv("CURRENT_STAGE", "Initializing")
 PROGRESS_PERCENT = os.getenv("PROGRESS_PERCENT", "0")
 BUILD_START_TIME = os.getenv("BUILD_START_TIME", "")
 ZIP_PATH = os.getenv("ZIP_PATH", "")
+FAILURE_STAGE = os.getenv("FAILURE_STAGE", "")
+STEP_NUMBER = os.getenv("STEP_NUMBER", "")
+ERROR_CODE = os.getenv("ERROR_CODE", "")
 
 # State management
 LIVE_MESSAGE_ID_FILE = "/tmp/live_message_id.txt"
@@ -36,9 +39,9 @@ def sizeof_fmt(num, suffix="B"):
     return f"{num:.1f}P{suffix}"
 
 def progress_bar(percent):
-    filled = int(percent / 5)
+    filled = int(float(percent) / 5)
     empty = 20 - filled
-    return f"[{'●' * filled}{'' * empty}] ({percent:.1f}%)"
+    return f"[{'●' * filled}{'○' * empty}] ({percent}%)"
 
 def get_elapsed_time():
     if not BUILD_START_TIME:
@@ -74,11 +77,7 @@ def get_elapsed_time():
         return "Unknown"
 
 def build_live_message():
-    # Determine title based on ROM type
-    if ROM_TYPE == "AOSP+MIUI":
-        title = f"🚀 Live Build Progress - AOSP+MIUI"
-    else:
-        title = f"🚀 Live Build Progress - {ROM_TYPE}"
+    title = f"🚀 Live Build Progress - {ROM_TYPE} ({KERNEL_BRANCH})"
     
     repo_url = f"{GITHUB_SERVER_URL}/{GITHUB_REPO}"
     branch_url = f"{KERNEL_SOURCE_URL}/tree/{KERNEL_BRANCH}"
@@ -92,7 +91,7 @@ def build_live_message():
 *Branch:* [{KERNEL_BRANCH}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
 
-*Progress:* {progress_bar(float(PROGRESS_PERCENT))}
+*Progress:* {progress_bar(PROGRESS_PERCENT)}
 *Stage:* `{CURRENT_STAGE}`
 *Build Time:* {get_elapsed_time()}
 """
@@ -102,10 +101,7 @@ def build_final_message(status):
     title_icon = "✅" if status == "success" else "❌"
     status_text = "Success" if status == "success" else "Failed"
     
-    if ROM_TYPE == "AOSP+MIUI":
-        title = f"{title_icon} Build {status_text} - AOSP+MIUI"
-    else:
-        title = f"{title_icon} Build {status_text} - {ROM_TYPE}"
+    title = f"{title_icon} Build {status_text} - {ROM_TYPE} ({KERNEL_BRANCH})"
     
     repo_url = f"{GITHUB_SERVER_URL}/{GITHUB_REPO}"
     branch_url = f"{KERNEL_SOURCE_URL}/tree/{KERNEL_BRANCH}"
@@ -121,86 +117,113 @@ def build_final_message(status):
 
 *Build Time:* {get_elapsed_time()}
 """
+    
+    if status == "failure" and FAILURE_STAGE:
+        message += f"\n*Failed at:* {FAILURE_STAGE}"
+        if STEP_NUMBER:
+            message += f" (Step {STEP_NUMBER})"
+        if ERROR_CODE:
+            message += f"\n*Error Code:* {ERROR_CODE}"
+    
     return message
 
 def send_message(text, parse_mode="Markdown"):
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": parse_mode,
-        "disable_web_page_preview": True
-    }
-    response = requests.post(telegram_api("sendMessage"), json=payload)
-    return response.json().get("result", {}).get("message_id")
+    try:
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": text,
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": True
+        }
+        response = requests.post(telegram_api("sendMessage"), json=payload, timeout=10)
+        response.raise_for_status()
+        return response.json().get("result", {}).get("message_id")
+    except Exception as e:
+        print(f"Failed to send message: {e}")
+        return None
 
 def edit_message(message_id, text, parse_mode="Markdown"):
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "message_id": message_id,
-        "text": text,
-        "parse_mode": parse_mode,
-        "disable_web_page_preview": True
-    }
-    response = requests.post(telegram_api("editMessageText"), json=payload)
-    return response.status_code == 200
+    try:
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": True
+        }
+        response = requests.post(telegram_api("editMessageText"), json=payload, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Failed to edit message: {e}")
+        return False
 
 def delete_message(message_id):
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "message_id": message_id,
-    }
-    requests.post(telegram_api("deleteMessage"), json=payload)
+    try:
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "message_id": message_id,
+        }
+        requests.post(telegram_api("deleteMessage"), json=payload, timeout=10)
+    except Exception as e:
+        print(f"Failed to delete message: {e}")
 
 def save_message_id(message_id):
-    with open(LIVE_MESSAGE_ID_FILE, 'w') as f:
-        f.write(str(message_id))
+    try:
+        with open(LIVE_MESSAGE_ID_FILE, 'w') as f:
+            f.write(str(message_id))
+    except Exception as e:
+        print(f"Failed to save message ID: {e}")
 
 def load_message_id():
     try:
-        with open(LIVE_MESSAGE_ID_FILE, 'r') as f:
-            return int(f.read().strip())
-    except (FileNotFoundError, ValueError):
-        return None
+        if os.path.exists(LIVE_MESSAGE_ID_FILE):
+            with open(LIVE_MESSAGE_ID_FILE, 'r') as f:
+                return int(f.read().strip())
+    except (FileNotFoundError, ValueError, Exception) as e:
+        print(f"Failed to load message ID: {e}")
+    return None
 
 def upload_file_with_progress(file_path):
     if not os.path.exists(file_path):
+        print(f"File not found: {file_path}")
         return False
 
-    file_size = os.path.getsize(file_path)
-    filename = os.path.basename(file_path)
+    try:
+        file_size = os.path.getsize(file_path)
+        filename = os.path.basename(file_path)
 
-    upload_msg = f"""📦 *Uploading File*
+        upload_msg = f"""📦 *Uploading File*
 *Name:* `{filename}`
 *Size:* {sizeof_fmt(file_size)}
 *Status:* Uploading...
 """
-    message_id = send_message(upload_msg)
+        message_id = send_message(upload_msg)
+        if not message_id:
+            return False
 
-    # Simulate progress
-    for progress in range(0, 101, 10):
-        progress_text = f"*Progress:* {progress_bar(progress)}"
-        updated_msg = upload_msg + "\n" + progress_text
-        edit_message(message_id, updated_msg)
-        time.sleep(0.3)
-
-    # Actually upload the file
-    with open(file_path, "rb") as f:
-        response = requests.post(
-            telegram_api("sendDocument"),
-            data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"📦 {filename}"},
-            files={"document": (filename, f)},
-        )
-    
-    if response.status_code == 200:
-        # Update status and then delete
-        uploaded_msg = upload_msg.replace("Uploading...", "✅ Uploaded")
-        edit_message(message_id, uploaded_msg)
-        time.sleep(2)
-        delete_message(message_id)
-        return True
-    else:
-        error_msg = upload_msg.replace("Uploading...", "❌ Upload Failed")
-        edit_message(message_id, error_msg)
+        # Actually upload the file
+        with open(file_path, "rb") as f:
+            response = requests.post(
+                telegram_api("sendDocument"),
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"📦 {filename}"},
+                files={"document": (filename, f)},
+                timeout=60
+            )
+        
+        if response.status_code == 200:
+            # Update status and then delete
+            uploaded_msg = upload_msg.replace("Uploading...", "✅ Uploaded")
+            edit_message(message_id, uploaded_msg)
+            time.sleep(2)
+            delete_message(message_id)
+            return True
+        else:
+            error_msg = upload_msg.replace("Uploading...", "❌ Upload Failed")
+            edit_message(message_id, error_msg)
+            return False
+            
+    except Exception as e:
+        print(f"Failed to upload file: {e}")
         return False
 
 def main():
@@ -209,6 +232,11 @@ def main():
         return
 
     action = os.getenv("TELEGRAM_ACTION", "start")
+    
+    print(f"Telegram action: {action}")
+    print(f"ROM_TYPE: {ROM_TYPE}")
+    print(f"KERNEL_BRANCH: {KERNEL_BRANCH}")
+    print(f"BUILD_STATUS: {BUILD_STATUS}")
     
     if action == "start":
         # Send initial live message
@@ -247,7 +275,10 @@ def main():
         
         # Upload file if build was successful
         if BUILD_STATUS == "success" and ZIP_PATH and os.path.exists(ZIP_PATH):
+            print(f"Uploading file: {ZIP_PATH}")
             upload_file_with_progress(ZIP_PATH)
+        elif BUILD_STATUS == "success":
+            print(f"ZIP_PATH not set or file doesn't exist: {ZIP_PATH}")
 
 if __name__ == "__main__":
     main()
