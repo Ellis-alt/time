@@ -25,8 +25,8 @@ FAILURE_STAGE = os.getenv("FAILURE_STAGE", "")
 STEP_NUMBER = os.getenv("STEP_NUMBER", "")
 ERROR_CODE = os.getenv("ERROR_CODE", "")
 
-# State management
-LIVE_MESSAGE_ID_FILE = "/tmp/live_message_id.txt"
+# State management - Unique file per matrix combination
+LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{KERNEL_BRANCH}.txt".replace("/", "_").replace(" ", "_")
 
 def telegram_api(method):
     return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
@@ -39,9 +39,13 @@ def sizeof_fmt(num, suffix="B"):
     return f"{num:.1f}P{suffix}"
 
 def progress_bar(percent):
-    filled = int(float(percent) / 5)
-    empty = 20 - filled
-    return f"[{'●' * filled}{'○' * empty}] ({percent}%)"
+    try:
+        percent_num = float(percent)
+        filled = int(percent_num / 5)
+        empty = 20 - filled
+        return f"[{'●' * filled}{'○' * empty}] ({percent}%)"
+    except:
+        return f"[{'○' * 20}] ({percent}%)"
 
 def get_elapsed_time():
     if not BUILD_START_TIME:
@@ -171,6 +175,7 @@ def save_message_id(message_id):
     try:
         with open(LIVE_MESSAGE_ID_FILE, 'w') as f:
             f.write(str(message_id))
+        print(f"Saved message ID {message_id} to {LIVE_MESSAGE_ID_FILE}")
     except Exception as e:
         print(f"Failed to save message ID: {e}")
 
@@ -178,9 +183,11 @@ def load_message_id():
     try:
         if os.path.exists(LIVE_MESSAGE_ID_FILE):
             with open(LIVE_MESSAGE_ID_FILE, 'r') as f:
-                return int(f.read().strip())
+                message_id = int(f.read().strip())
+                print(f"Loaded message ID {message_id} from {LIVE_MESSAGE_ID_FILE}")
+                return message_id
     except (FileNotFoundError, ValueError, Exception) as e:
-        print(f"Failed to load message ID: {e}")
+        print(f"Failed to load message ID from {LIVE_MESSAGE_ID_FILE}: {e}")
     return None
 
 def upload_file_with_progress(file_path):
@@ -237,6 +244,7 @@ def main():
     print(f"ROM_TYPE: {ROM_TYPE}")
     print(f"KERNEL_BRANCH: {KERNEL_BRANCH}")
     print(f"BUILD_STATUS: {BUILD_STATUS}")
+    print(f"Message ID file: {LIVE_MESSAGE_ID_FILE}")
     
     if action == "start":
         # Send initial live message
