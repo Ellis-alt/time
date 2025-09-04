@@ -1,0 +1,20 @@
+# Release Title
+RealKing Kernel $release_tag - Munch|Munchin
+
+# Release Notes
+Author: [Uday](https://t.me/fortecipher)
+Support: [Uday](https://t.me/fortecipher)
+
+---
+
+__Notes:__
+
+Added `susfs v1.5.5` patch
+Added more `ksu` manager support, current supported list:
+
+- ksun
+- official ksu
+- mksu
+- rksu
+- ksu magic
+- sukisu
