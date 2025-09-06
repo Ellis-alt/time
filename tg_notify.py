@@ -4,6 +4,7 @@ import time
 import json
 from datetime import datetime
 from pathlib import Path
+import re
 
 # Configuration
 TELEGRAM_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -25,7 +26,9 @@ KPM_ENABLED = os.getenv("kpm", "false").lower() == "true"
 CLANG_VERSION = os.getenv("clang", "unknown")
 
 # Create unique message ID file for each matrix combination
-LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{KERNEL_BRANCH}.txt"
+# Sanitize branch name for filename
+sanitized_branch = re.sub(r'[^a-zA-Z0-9_]', '_', KERNEL_BRANCH)
+LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{sanitized_branch}.txt"
 
 def telegram_api(method):
     return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
@@ -75,6 +78,17 @@ def get_elapsed_time():
         print(f"Time string: {BUILD_START_TIME}")
         return "Unknown"
 
+def escape_markdown(text):
+    """Escape special Markdown characters"""
+    if not text:
+        return text
+    
+    # Escape characters that have special meaning in Markdown
+    escape_chars = r'\_*[]()~`>#+-=|{}.!'
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
 def build_live_message():
     # Build title with ROM type and kernel branch
     title = f"🚀 Live Build Progress - {ROM_TYPE} ({KERNEL_BRANCH})"
@@ -85,19 +99,28 @@ def build_live_message():
     # Add KPM status
     kpm_status = "✅ Enabled" if KPM_ENABLED else "❌ Disabled"
     
+    # Escape all user-provided text for Markdown
+    escaped_workflow = escape_markdown(GITHUB_WORKFLOW)
+    escaped_actor = escape_markdown(GITHUB_ACTOR)
+    escaped_run_id = escape_markdown(GITHUB_RUN_ID)
+    escaped_repo = escape_markdown(GITHUB_REPO)
+    escaped_branch = escape_markdown(KERNEL_BRANCH)
+    escaped_clang = escape_markdown(CLANG_VERSION)
+    escaped_stage = escape_markdown(CURRENT_STAGE)
+    
     message = f"""{title}
 
-*Workflow:* {GITHUB_WORKFLOW}
-*Initiated By:* {GITHUB_ACTOR}
-*Build ID:* `{GITHUB_RUN_ID}`
-*Repository:* [{GITHUB_REPO}]({repo_url})
-*Branch:* [{KERNEL_BRANCH}]({branch_url})
+*Workflow:* {escaped_workflow}
+*Initiated By:* {escaped_actor}
+*Build ID:* `{escaped_run_id}`
+*Repository:* [{escaped_repo}]({repo_url})
+*Branch:* [{escaped_branch}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
-*Clang:* `{CLANG_VERSION}`
+*Clang:* `{escaped_clang}`
 *KPM:* {kpm_status}
 
 *Progress:* {progress_bar(PROGRESS_PERCENT)}
-*Stage:* `{CURRENT_STAGE}`
+*Stage:* `{escaped_stage}`
 *Build Time:* {get_elapsed_time()}
 """
     return message
@@ -114,15 +137,23 @@ def build_final_message(status):
     # Add KPM status
     kpm_status = "✅ Enabled" if KPM_ENABLED else "❌ Disabled"
     
+    # Escape all user-provided text for Markdown
+    escaped_workflow = escape_markdown(GITHUB_WORKFLOW)
+    escaped_actor = escape_markdown(GITHUB_ACTOR)
+    escaped_run_id = escape_markdown(GITHUB_RUN_ID)
+    escaped_repo = escape_markdown(GITHUB_REPO)
+    escaped_branch = escape_markdown(KERNEL_BRANCH)
+    escaped_clang = escape_markdown(CLANG_VERSION)
+    
     message = f"""{title}
 
-*Workflow:* {GITHUB_WORKFLOW}
-*Initiated By:* {GITHUB_ACTOR}
-*Build ID:* `{GITHUB_RUN_ID}`
-*Repository:* [{GITHUB_REPO}]({repo_url})
-*Branch:* [{KERNEL_BRANCH}]({branch_url})
+*Workflow:* {escaped_workflow}
+*Initiated By:* {escaped_actor}
+*Build ID:* `{escaped_run_id}`
+*Repository:* [{escaped_repo}]({repo_url})
+*Branch:* [{escaped_branch}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
-*Clang:* `{CLANG_VERSION}`
+*Clang:* `{escaped_clang}`
 *KPM:* {kpm_status}
 
 *Build Time:* {get_elapsed_time()}
@@ -146,6 +177,13 @@ def send_message(text, parse_mode="Markdown"):
             return response.json().get("result", {}).get("message_id")
         else:
             print(f"Failed to send message: {response.status_code} - {response.text}")
+            # Try without Markdown if it fails
+            if "can't parse entities" in response.text:
+                print("Retrying without Markdown formatting...")
+                payload["parse_mode"] = None
+                response = requests.post(telegram_api("sendMessage"), json=payload, timeout=10)
+                if response.status_code == 200:
+                    return response.json().get("result", {}).get("message_id")
             return None
     except Exception as e:
         print(f"Error sending message: {e}")
@@ -165,6 +203,10 @@ def edit_message(message_id, text, parse_mode="Markdown"):
     }
     try:
         response = requests.post(telegram_api("editMessageText"), json=payload, timeout=10)
+        if response.status_code != 200 and "can't parse entities" in response.text:
+            # Try without Markdown if it fails
+            payload["parse_mode"] = None
+            response = requests.post(telegram_api("editMessageText"), json=payload, timeout=10)
         return response.status_code == 200
     except Exception as e:
         print(f"Error editing message: {e}")
@@ -271,6 +313,13 @@ def main():
         if message_id:
             save_message_id(message_id)
             print(f"Live message sent with ID: {message_id}")
+        else:
+            # Fallback: try without Markdown
+            print("Trying fallback without Markdown...")
+            message = build_live_message().replace('*', '').replace('`', '').replace('_', '')
+            message_id = send_message(message, parse_mode=None)
+            if message_id:
+                save_message_id(message_id)
     
     elif action == "update":
         # Update existing live message
