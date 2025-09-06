@@ -24,8 +24,8 @@ ZIP_PATH = os.getenv("ZIP_PATH", "")
 KPM_ENABLED = os.getenv("kpm", "false").lower() == "true"
 CLANG_VERSION = os.getenv("clang", "unknown")
 
-# State management
-LIVE_MESSAGE_ID_FILE = "/tmp/live_message_id.txt"
+# Create unique message ID file for each matrix combination
+LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{KERNEL_BRANCH}.txt"
 
 def telegram_api(method):
     return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
@@ -262,6 +262,7 @@ def main():
     print(f"BUILD_STATUS: {BUILD_STATUS}")
     print(f"CURRENT_STAGE: {CURRENT_STAGE}")
     print(f"PROGRESS_PERCENT: {PROGRESS_PERCENT}")
+    print(f"Message ID file: {LIVE_MESSAGE_ID_FILE}")
     
     if action == "start":
         # Send initial live message
