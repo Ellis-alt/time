@@ -31,13 +31,42 @@ LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{KERNEL_BRANCH}.txt"
 def telegram_api(method):
     return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
 
-def escape_markdown(text):
-    """Escape special Markdown characters"""
+def escape_markdown_v2(text):
+    """Escape special MarkdownV2 characters for Telegram"""
     if not text:
         return text
     
-    # List of characters that need to be escaped in Markdown
+    # Characters that need to be escaped in MarkdownV2
     escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    
+    return text
+
+def escape_markdown(text):
+    """Escape only the text content (not URLs or formatting)"""
+    if not text:
+        return text
+    
+    # Only escape characters that would break inline formatting
+    # Don't escape characters used in URLs or Markdown syntax
+    escape_chars = ['_', '*', '`', '|']
+    
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    
+    return text
+
+def escape_text_for_markdown(text):
+    """
+    Escape text for use in Markdown, but preserve URLs and formatting structure
+    """
+    if not text:
+        return text
+    
+    # Escape only characters that would break the text content, not the Markdown structure
+    escape_chars = ['_', '*', '`']
     
     for char in escape_chars:
         text = text.replace(char, f'\\{char}')
@@ -99,19 +128,19 @@ def build_live_message():
     # Add KPM status
     kpm_status = "✅ Enabled" if KPM_ENABLED else "❌ Disabled"
     
-    # Escape all user-generated content for Markdown
-    escaped_repo = escape_markdown(GITHUB_REPO)
-    escaped_branch = escape_markdown(KERNEL_BRANCH)
-    escaped_clang = escape_markdown(CLANG_VERSION)
-    escaped_stage = escape_markdown(CURRENT_STAGE)
+    # Escape only the text content, not the Markdown structure
+    escaped_repo_name = escape_text_for_markdown(GITHUB_REPO)
+    escaped_branch_name = escape_text_for_markdown(KERNEL_BRANCH)
+    escaped_clang = escape_text_for_markdown(CLANG_VERSION)
+    escaped_stage = escape_text_for_markdown(CURRENT_STAGE)
     
-    message = f"""{title}
+    message = f"""*{title}*
 
 *Workflow:* {GITHUB_WORKFLOW}
 *Initiated By:* {GITHUB_ACTOR}
 *Build ID:* `{GITHUB_RUN_ID}`
-*Repository:* [{escaped_repo}]({repo_url})
-*Branch:* [{escaped_branch}]({branch_url})
+*Repository:* [{escaped_repo_name}]({repo_url})
+*Branch:* [{escaped_branch_name}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
 *Clang:* `{escaped_clang}`
 *KPM:* {kpm_status}
@@ -134,18 +163,18 @@ def build_final_message(status):
     # Add KPM status
     kpm_status = "✅ Enabled" if KPM_ENABLED else "❌ Disabled"
     
-    # Escape all user-generated content for Markdown
-    escaped_repo = escape_markdown(GITHUB_REPO)
-    escaped_branch = escape_markdown(KERNEL_BRANCH)
-    escaped_clang = escape_markdown(CLANG_VERSION)
+    # Escape only the text content, not the Markdown structure
+    escaped_repo_name = escape_text_for_markdown(GITHUB_REPO)
+    escaped_branch_name = escape_text_for_markdown(KERNEL_BRANCH)
+    escaped_clang = escape_text_for_markdown(CLANG_VERSION)
     
-    message = f"""{title}
+    message = f"""*{title}*
 
 *Workflow:* {GITHUB_WORKFLOW}
 *Initiated By:* {GITHUB_ACTOR}
 *Build ID:* `{GITHUB_RUN_ID}`
-*Repository:* [{escaped_repo}]({repo_url})
-*Branch:* [{escaped_branch}]({branch_url})
+*Repository:* [{escaped_repo_name}]({repo_url})
+*Branch:* [{escaped_branch_name}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
 *Clang:* `{escaped_clang}`
 *KPM:* {kpm_status}
@@ -173,18 +202,34 @@ def send_message(text, parse_mode="Markdown"):
         else:
             print(f"Failed to send message: {response.status_code} - {response.text}")
             
-            # Try without Markdown if it fails
-            if "parse_mode" in payload:
-                print("Retrying without Markdown formatting...")
-                payload.pop("parse_mode")
+            # Try with MarkdownV2 if Markdown fails
+            if parse_mode == "Markdown":
+                print("Retrying with MarkdownV2...")
+                payload["parse_mode"] = "MarkdownV2"
+                # Convert text to MarkdownV2 format
+                v2_text = convert_to_markdown_v2(text)
+                payload["text"] = v2_text
                 response = requests.post(telegram_api("sendMessage"), json=payload, timeout=10)
                 if response.status_code == 200:
                     return response.json().get("result", {}).get("message_id")
+            
+            # Try without any formatting as last resort
+            print("Retrying without any formatting...")
+            payload.pop("parse_mode", None)
+            response = requests.post(telegram_api("sendMessage"), json=payload, timeout=10)
+            if response.status_code == 200:
+                return response.json().get("result", {}).get("message_id")
             
             return None
     except Exception as e:
         print(f"Error sending message: {e}")
         return None
+
+def convert_to_markdown_v2(text):
+    """Convert Markdown text to MarkdownV2 format"""
+    # This is a simple conversion - in practice you might need more complex logic
+    # For now, just escape all special characters for V2
+    return escape_markdown_v2(text)
 
 def edit_message(message_id, text, parse_mode="Markdown"):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -206,14 +251,23 @@ def edit_message(message_id, text, parse_mode="Markdown"):
         else:
             print(f"Failed to edit message: {response.status_code} - {response.text}")
             
-            # Try without Markdown if it fails
-            if "parse_mode" in payload:
-                print("Retrying edit without Markdown formatting...")
-                payload.pop("parse_mode")
+            # Try with MarkdownV2 if Markdown fails
+            if parse_mode == "Markdown":
+                print("Retrying edit with MarkdownV2...")
+                payload["parse_mode"] = "MarkdownV2"
+                # Convert text to MarkdownV2 format
+                v2_text = convert_to_markdown_v2(text)
+                payload["text"] = v2_text
                 response = requests.post(telegram_api("editMessageText"), json=payload, timeout=10)
-                return response.status_code == 200
+                if response.status_code == 200:
+                    return True
             
-            return False
+            # Try without any formatting as last resort
+            print("Retrying edit without any formatting...")
+            payload.pop("parse_mode", None)
+            response = requests.post(telegram_api("editMessageText"), json=payload, timeout=10)
+            return response.status_code == 200
+            
     except Exception as e:
         print(f"Error editing message: {e}")
         return False
