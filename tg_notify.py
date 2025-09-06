@@ -39,8 +39,6 @@ def escape_markdown_text(text):
     if not text:
         return text
     
-    # Escape only the minimal set of characters that could break Markdown
-    # but preserve visual appearance
     escape_chars = ['*', '`', '[', ']', '(', ')']
     
     for char in escape_chars:
@@ -94,20 +92,17 @@ def get_elapsed_time():
         return "Unknown"
 
 def build_live_message():
-    # Build title with ROM type and kernel branch - no escaping in title
     title = f"🚀 Live Build Progress - {ROM_TYPE} ({KERNEL_BRANCH})"
     
     repo_url = f"{GITHUB_SERVER_URL}/{GITHUB_REPO}"
-    branch_url = f"{KERNEL_SOURCE_URL}/tree/{KERNEL_BRANCH}"
+    branch_url = f"{KERNEL_SOURCE_URL.removesuffix('.git')}/tree/{KERNEL_BRANCH}"
     
-    # Add KPM status
-    kpm_status = "✅ Enabled" if KPM_ENABLED else "❌ Disabled"
+    kpm_status = "Enabled" if KPM_ENABLED else "Disabled"
     
-    # For display text, use minimal escaping to keep it clean visually
     escaped_repo_name = escape_markdown_text(GITHUB_REPO)
-    escaped_branch_name = KERNEL_BRANCH  # No escaping for display text - keep underscores visible
+    escaped_branch_name = KERNEL_BRANCH
     escaped_clang = escape_markdown_text(CLANG_VERSION)
-    escaped_stage = CURRENT_STAGE  # No escaping for stage - keep underscores visible
+    escaped_stage = CURRENT_STAGE
     
     message = f"""*{title}*
 
@@ -127,20 +122,18 @@ def build_live_message():
     return message
 
 def build_final_message(status):
-    title_icon = "✅" if status == "success" else "❌"
+    title_icon = "✔" if status == "success" else "✘"
     status_text = "Success" if status == "success" else "Failed"
     
     title = f"{title_icon} Build {status_text} - {ROM_TYPE} ({KERNEL_BRANCH})"
     
     repo_url = f"{GITHUB_SERVER_URL}/{GITHUB_REPO}"
-    branch_url = f"{KERNEL_SOURCE_URL}/tree/{KERNEL_BRANCH}"
+    branch_url = f"{KERNEL_SOURCE_URL.removesuffix('.git')}/tree/{KERNEL_BRANCH}"
     
-    # Add KPM status
-    kpm_status = "✅ Enabled" if KPM_ENABLED else "❌ Disabled"
+    kpm_status = "Enabled" if KPM_ENABLED else "Disabled"
     
-    # For display text, use minimal escaping to keep it clean visually
     escaped_repo_name = escape_markdown_text(GITHUB_REPO)
-    escaped_branch_name = KERNEL_BRANCH  # No escaping for display text
+    escaped_branch_name = KERNEL_BRANCH
     escaped_clang = escape_markdown_text(CLANG_VERSION)
     
     message = f"""*{title}*
@@ -177,19 +170,15 @@ def send_message(text, parse_mode="Markdown"):
         else:
             print(f"Failed to send message: {response.status_code} - {response.text}")
             
-            # If it's a parsing error, try with a simpler approach
             if "can't parse entities" in response.text:
                 print("Retrying with safer formatting...")
-                # Create a simpler message without complex Markdown
                 lines = text.split('\n')
                 simple_lines = []
                 for line in lines:
                     if line.strip().startswith('*') and line.strip().endswith('*'):
-                        # Remove Markdown formatting but keep the content
                         clean_line = line.replace('*', '').strip()
                         simple_lines.append(clean_line)
                     elif '[' in line and '](' in line and ')' in line:
-                        # Handle links by extracting the visible text
                         match = re.search(r'\[([^\]]+)\]\([^)]+\)', line)
                         if match:
                             simple_lines.append(match.group(1))
