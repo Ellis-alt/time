@@ -2,9 +2,9 @@ import os
 import requests
 import time
 import json
+import re
 from datetime import datetime
 from pathlib import Path
-import re
 
 # Configuration
 TELEGRAM_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -26,12 +26,23 @@ KPM_ENABLED = os.getenv("kpm", "false").lower() == "true"
 CLANG_VERSION = os.getenv("clang", "unknown")
 
 # Create unique message ID file for each matrix combination
-# Sanitize branch name for filename
-sanitized_branch = re.sub(r'[^a-zA-Z0-9_]', '_', KERNEL_BRANCH)
-LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{sanitized_branch}.txt"
+LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{KERNEL_BRANCH}.txt"
 
 def telegram_api(method):
     return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
+
+def escape_markdown(text):
+    """Escape special Markdown characters"""
+    if not text:
+        return text
+    
+    # List of characters that need to be escaped in Markdown
+    escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    
+    return text
 
 def sizeof_fmt(num, suffix="B"):
     for unit in ["", "K", "M", "G", "T"]:
@@ -78,17 +89,6 @@ def get_elapsed_time():
         print(f"Time string: {BUILD_START_TIME}")
         return "Unknown"
 
-def escape_markdown(text):
-    """Escape special Markdown characters"""
-    if not text:
-        return text
-    
-    # Escape characters that have special meaning in Markdown
-    escape_chars = r'\_*[]()~`>#+-=|{}.!'
-    for char in escape_chars:
-        text = text.replace(char, f'\\{char}')
-    return text
-
 def build_live_message():
     # Build title with ROM type and kernel branch
     title = f"🚀 Live Build Progress - {ROM_TYPE} ({KERNEL_BRANCH})"
@@ -99,10 +99,7 @@ def build_live_message():
     # Add KPM status
     kpm_status = "✅ Enabled" if KPM_ENABLED else "❌ Disabled"
     
-    # Escape all user-provided text for Markdown
-    escaped_workflow = escape_markdown(GITHUB_WORKFLOW)
-    escaped_actor = escape_markdown(GITHUB_ACTOR)
-    escaped_run_id = escape_markdown(GITHUB_RUN_ID)
+    # Escape all user-generated content for Markdown
     escaped_repo = escape_markdown(GITHUB_REPO)
     escaped_branch = escape_markdown(KERNEL_BRANCH)
     escaped_clang = escape_markdown(CLANG_VERSION)
@@ -110,9 +107,9 @@ def build_live_message():
     
     message = f"""{title}
 
-*Workflow:* {escaped_workflow}
-*Initiated By:* {escaped_actor}
-*Build ID:* `{escaped_run_id}`
+*Workflow:* {GITHUB_WORKFLOW}
+*Initiated By:* {GITHUB_ACTOR}
+*Build ID:* `{GITHUB_RUN_ID}`
 *Repository:* [{escaped_repo}]({repo_url})
 *Branch:* [{escaped_branch}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
@@ -137,19 +134,16 @@ def build_final_message(status):
     # Add KPM status
     kpm_status = "✅ Enabled" if KPM_ENABLED else "❌ Disabled"
     
-    # Escape all user-provided text for Markdown
-    escaped_workflow = escape_markdown(GITHUB_WORKFLOW)
-    escaped_actor = escape_markdown(GITHUB_ACTOR)
-    escaped_run_id = escape_markdown(GITHUB_RUN_ID)
+    # Escape all user-generated content for Markdown
     escaped_repo = escape_markdown(GITHUB_REPO)
     escaped_branch = escape_markdown(KERNEL_BRANCH)
     escaped_clang = escape_markdown(CLANG_VERSION)
     
     message = f"""{title}
 
-*Workflow:* {escaped_workflow}
-*Initiated By:* {escaped_actor}
-*Build ID:* `{escaped_run_id}`
+*Workflow:* {GITHUB_WORKFLOW}
+*Initiated By:* {GITHUB_ACTOR}
+*Build ID:* `{GITHUB_RUN_ID}`
 *Repository:* [{escaped_repo}]({repo_url})
 *Branch:* [{escaped_branch}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
@@ -171,19 +165,22 @@ def send_message(text, parse_mode="Markdown"):
         "parse_mode": parse_mode,
         "disable_web_page_preview": True
     }
+    
     try:
         response = requests.post(telegram_api("sendMessage"), json=payload, timeout=10)
         if response.status_code == 200:
             return response.json().get("result", {}).get("message_id")
         else:
             print(f"Failed to send message: {response.status_code} - {response.text}")
+            
             # Try without Markdown if it fails
-            if "can't parse entities" in response.text:
+            if "parse_mode" in payload:
                 print("Retrying without Markdown formatting...")
-                payload["parse_mode"] = None
+                payload.pop("parse_mode")
                 response = requests.post(telegram_api("sendMessage"), json=payload, timeout=10)
                 if response.status_code == 200:
                     return response.json().get("result", {}).get("message_id")
+            
             return None
     except Exception as e:
         print(f"Error sending message: {e}")
@@ -201,13 +198,22 @@ def edit_message(message_id, text, parse_mode="Markdown"):
         "parse_mode": parse_mode,
         "disable_web_page_preview": True
     }
+    
     try:
         response = requests.post(telegram_api("editMessageText"), json=payload, timeout=10)
-        if response.status_code != 200 and "can't parse entities" in response.text:
+        if response.status_code == 200:
+            return True
+        else:
+            print(f"Failed to edit message: {response.status_code} - {response.text}")
+            
             # Try without Markdown if it fails
-            payload["parse_mode"] = None
-            response = requests.post(telegram_api("editMessageText"), json=payload, timeout=10)
-        return response.status_code == 200
+            if "parse_mode" in payload:
+                print("Retrying edit without Markdown formatting...")
+                payload.pop("parse_mode")
+                response = requests.post(telegram_api("editMessageText"), json=payload, timeout=10)
+                return response.status_code == 200
+            
+            return False
     except Exception as e:
         print(f"Error editing message: {e}")
         return False
@@ -313,13 +319,6 @@ def main():
         if message_id:
             save_message_id(message_id)
             print(f"Live message sent with ID: {message_id}")
-        else:
-            # Fallback: try without Markdown
-            print("Trying fallback without Markdown...")
-            message = build_live_message().replace('*', '').replace('`', '').replace('_', '')
-            message_id = send_message(message, parse_mode=None)
-            if message_id:
-                save_message_id(message_id)
     
     elif action == "update":
         # Update existing live message
