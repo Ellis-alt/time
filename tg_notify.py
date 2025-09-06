@@ -48,21 +48,6 @@ def escape_markdown_text(text):
     
     return text
 
-def escape_markdown_url(text):
-    """
-    Escape characters for URL content (more aggressive escaping)
-    """
-    if not text:
-        return text
-    
-    # Escape characters that could break URLs in Markdown
-    escape_chars = ['_', '*', '`', '[', ']', '(', ')', '~', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    
-    for char in escape_chars:
-        text = text.replace(char, f'\\{char}')
-    
-    return text
-
 def sizeof_fmt(num, suffix="B"):
     for unit in ["", "K", "M", "G", "T"]:
         if abs(num) < 1024.0:
@@ -124,17 +109,13 @@ def build_live_message():
     escaped_clang = escape_markdown_text(CLANG_VERSION)
     escaped_stage = CURRENT_STAGE  # No escaping for stage - keep underscores visible
     
-    # For URLs, we need to escape the branch name properly
-    escaped_branch_url = escape_markdown_url(KERNEL_BRANCH)
-    escaped_branch_url = branch_url.replace(KERNEL_BRANCH, escaped_branch_url)
-    
     message = f"""*{title}*
 
 *Workflow:* {GITHUB_WORKFLOW}
 *Initiated By:* {GITHUB_ACTOR}
 *Build ID:* `{GITHUB_RUN_ID}`
 *Repository:* [{escaped_repo_name}]({repo_url})
-*Branch:* [{escaped_branch_name}]({escaped_branch_url})
+*Branch:* [{escaped_branch_name}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
 *Clang:* `{escaped_clang}`
 *KPM:* {kpm_status}
@@ -162,17 +143,13 @@ def build_final_message(status):
     escaped_branch_name = KERNEL_BRANCH  # No escaping for display text
     escaped_clang = escape_markdown_text(CLANG_VERSION)
     
-    # For URLs, we need to escape the branch name properly
-    escaped_branch_url = escape_markdown_url(KERNEL_BRANCH)
-    escaped_branch_url = branch_url.replace(KERNEL_BRANCH, escaped_branch_url)
-    
     message = f"""*{title}*
 
 *Workflow:* {GITHUB_WORKFLOW}
 *Initiated By:* {GITHUB_ACTOR}
 *Build ID:* `{GITHUB_RUN_ID}`
 *Repository:* [{escaped_repo_name}]({repo_url})
-*Branch:* [{escaped_branch_name}]({escaped_branch_url})
+*Branch:* [{escaped_branch_name}]({branch_url})
 *Kernel Source:* [Link]({KERNEL_SOURCE_URL})
 *Clang:* `{escaped_clang}`
 *KPM:* {kpm_status}
@@ -200,11 +177,28 @@ def send_message(text, parse_mode="Markdown"):
         else:
             print(f"Failed to send message: {response.status_code} - {response.text}")
             
-            # Try with a more conservative approach - remove problematic characters
+            # If it's a parsing error, try with a simpler approach
             if "can't parse entities" in response.text:
                 print("Retrying with safer formatting...")
-                # Replace the message with a simpler version
-                simple_text = text.replace('*', '').replace('`', '').replace('_', ' ')
+                # Create a simpler message without complex Markdown
+                lines = text.split('\n')
+                simple_lines = []
+                for line in lines:
+                    if line.strip().startswith('*') and line.strip().endswith('*'):
+                        # Remove Markdown formatting but keep the content
+                        clean_line = line.replace('*', '').strip()
+                        simple_lines.append(clean_line)
+                    elif '[' in line and '](' in line and ')' in line:
+                        # Handle links by extracting the visible text
+                        match = re.search(r'\[([^\]]+)\]\([^)]+\)', line)
+                        if match:
+                            simple_lines.append(match.group(1))
+                        else:
+                            simple_lines.append(line)
+                    else:
+                        simple_lines.append(line)
+                
+                simple_text = '\n'.join(simple_lines)
                 payload["text"] = simple_text
                 payload.pop("parse_mode", None)
                 response = requests.post(telegram_api("sendMessage"), json=payload, timeout=10)
