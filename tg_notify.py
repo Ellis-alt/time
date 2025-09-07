@@ -3,12 +3,13 @@ import requests
 import time
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Configuration
 TELEGRAM_TOKEN = os.getenv("TG_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TG_CHAT_ID")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPOSITORY", "unknown/repo")
 GITHUB_ACTOR = os.getenv("GITHUB_ACTOR", "unknown")
 GITHUB_SERVER_URL = "https://github.com"
@@ -20,7 +21,6 @@ ROM_TYPE = os.getenv("ROM_TYPE", "unknown")
 BUILD_STATUS = os.getenv("BUILD_STATUS", "in_progress")
 CURRENT_STAGE = os.getenv("CURRENT_STAGE", "Initializing")
 PROGRESS_PERCENT = os.getenv("PROGRESS_PERCENT", "0")
-BUILD_START_TIME = os.getenv("BUILD_START_TIME", "")
 ZIP_PATH = os.getenv("ZIP_PATH", "")
 KPM_ENABLED = os.getenv("kpm", "false").lower() == "true"
 CLANG_VERSION = os.getenv("clang", "unknown")
@@ -30,6 +30,9 @@ LIVE_MESSAGE_ID_FILE = f"/tmp/live_message_{ROM_TYPE}_{KERNEL_BRANCH}.txt"
 
 def telegram_api(method):
     return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
+
+def github_api(endpoint):
+    return f"https://api.github.com/repos/{GITHUB_REPO}/{endpoint}"
 
 def escape_markdown_text(text):
     """
@@ -58,20 +61,42 @@ def progress_bar(percent):
     empty = 20 - filled
     return f"[{'●' * filled}{'○' * empty}] ({percent}%)"
 
+def get_workflow_start_time():
+    """Get the actual workflow start time from GitHub API"""
+    if not GITHUB_TOKEN or not GITHUB_RUN_ID:
+        print("GitHub token or run ID not available")
+        return None
+    
+    try:
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        # Get workflow run details
+        response = requests.get(github_api(f"actions/runs/{GITHUB_RUN_ID}"), headers=headers, timeout=10)
+        if response.status_code == 200:
+            run_data = response.json()
+            created_at = run_data.get("created_at")
+            if created_at:
+                # Parse GitHub's ISO 8601 format
+                return datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+        
+        print(f"Failed to get workflow start time: {response.status_code}")
+        return None
+        
+    except Exception as e:
+        print(f"Error getting workflow start time: {e}")
+        return None
+
 def get_elapsed_time():
-    if not BUILD_START_TIME:
+    """Calculate elapsed time since workflow started using GitHub API"""
+    start_time = get_workflow_start_time()
+    if not start_time:
         return "0 mins 0 secs"
     
     try:
-        # Handle different time formats from GitHub Actions
-        time_str = BUILD_START_TIME
-        if 'Z' in time_str:
-            time_str = time_str.replace('Z', '+00:00')
-        
-        # Parse ISO 8601 time
-        start_time = datetime.fromisoformat(time_str)
-        current_time = datetime.now().astimezone()
-        
+        current_time = datetime.now(timezone.utc)
         elapsed = current_time - start_time
         total_seconds = int(elapsed.total_seconds())
         
@@ -88,8 +113,32 @@ def get_elapsed_time():
             
     except Exception as e:
         print(f"Error calculating elapsed time: {e}")
-        print(f"Time string: {BUILD_START_TIME}")
         return "Unknown"
+
+def get_live_elapsed_time():
+    """Get elapsed time with live updating capability"""
+    start_time = get_workflow_start_time()
+    if not start_time:
+        return "⏱️ 0s"
+    
+    try:
+        current_time = datetime.now(timezone.utc)
+        elapsed = current_time - start_time
+        total_seconds = int(elapsed.total_seconds())
+        
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        
+        # Create a live timer format
+        if hours > 0:
+            return f"⏱️ {hours:02d}:{minutes:02d}:{seconds:02d}"
+        else:
+            return f"⏱️ {minutes:02d}:{seconds:02d}"
+            
+    except Exception as e:
+        print(f"Error calculating live elapsed time: {e}")
+        return "⏱️ --:--"
 
 def build_live_message():
     title = f"🚀 Live Build Progress - {ROM_TYPE} ({KERNEL_BRANCH})"
@@ -104,6 +153,9 @@ def build_live_message():
     escaped_clang = escape_markdown_text(CLANG_VERSION)
     escaped_stage = CURRENT_STAGE
     
+    # Get live elapsed time
+    elapsed_time = get_live_elapsed_time()
+    
     message = f"""*{title}*
 
 *Workflow:* {GITHUB_WORKFLOW}
@@ -117,12 +169,12 @@ def build_live_message():
 
 *Progress:* {progress_bar(PROGRESS_PERCENT)}
 *Stage:* `{escaped_stage}`
-*Build Time:* {get_elapsed_time()}
+*Elapsed Time:* {elapsed_time}
 """
     return message
 
 def build_final_message(status):
-    title_icon = "✔" if status == "success" else "✘"
+    title_icon = "✅" if status == "success" else "❌"
     status_text = "Success" if status == "success" else "Failed"
     
     title = f"{title_icon} Build {status_text} - {ROM_TYPE} ({KERNEL_BRANCH})"
@@ -136,6 +188,9 @@ def build_final_message(status):
     escaped_branch_name = KERNEL_BRANCH
     escaped_clang = escape_markdown_text(CLANG_VERSION)
     
+    # Get final elapsed time
+    elapsed_time = get_elapsed_time()
+    
     message = f"""*{title}*
 
 *Workflow:* {GITHUB_WORKFLOW}
@@ -147,7 +202,7 @@ def build_final_message(status):
 *Clang:* `{escaped_clang}`
 *KPM:* {kpm_status}
 
-*Build Time:* {get_elapsed_time()}
+*Total Build Time:* {elapsed_time}
 """
     return message
 
