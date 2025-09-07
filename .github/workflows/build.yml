@@ -102,19 +102,12 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       build_start_time: ${{ steps.set.outputs.BUILD_START_TIME }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Install jq
-        run: |
-          sudo apt-get install -y jq
-          python3 tg_notify.py
-      
+    steps: 
       - id: set
         run: |
+          #Install Jq
+          sudo apt-get install -y jq
+          
           # Handle ROM selection
           ROM="${{ github.event.inputs.ROM }}"
           if [[ "$ROM" == "AOSP" ]]; then
