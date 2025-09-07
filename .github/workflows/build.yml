@@ -104,14 +104,12 @@ jobs:
       build_start_time: ${{ steps.set.outputs.BUILD_START_TIME }}
     steps:
       - name: Install jq
-        run: sudo apt-get install -y jq
+        run: |
+          sudo apt-get install -y jq
+          python3 tg_notify.py
       
       - id: set
         run: |
-          BUILD_START_TIME=$(date --iso-8601=seconds)
-          echo "BUILD_START_TIME=$BUILD_START_TIME" >> $GITHUB_ENV
-          echo "BUILD_START_TIME=$BUILD_START_TIME" >> $GITHUB_OUTPUT
-          
           # Handle ROM selection
           ROM="${{ github.event.inputs.ROM }}"
           if [[ "$ROM" == "AOSP" ]]; then
@@ -173,7 +171,7 @@ jobs:
       draft: ${{ inputs.draft || github.event.inputs.draft || false }}
       TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
       TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-      BUILD_START_TIME: ${{ needs.set-matrix.outputs.build_start_time }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -187,8 +185,7 @@ jobs:
           TELEGRAM_ACTION: start  
           CURRENT_STAGE: Initializing  
           PROGRESS_PERCENT: 0  
-        run: |  
-          echo "BUILD_START_TIME: $BUILD_START_TIME"  
+        run: |
           python3 tg_notify.py  
 
       - name: Clone Kernel Source  
@@ -402,8 +399,6 @@ jobs:
       - name: Build Summary and GitHub Release  
         id: build-github-release  
         if: ${{ always() && env.use_release == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}  
-        env:  
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
         run: |  
           echo "=============================================="  
           echo "           BUILD SUMMARY"  
