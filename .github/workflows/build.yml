@@ -178,6 +178,11 @@ jobs:
       TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          
       - name: Initialize Telegram Live Message  
         env:  
           ROM_TYPE: ${{ matrix.rom_type }}  
