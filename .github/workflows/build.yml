@@ -103,6 +103,11 @@ jobs:
       matrix: ${{ steps.set.outputs.matrix }}
       build_start_time: ${{ steps.set.outputs.BUILD_START_TIME }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Install jq
         run: |
           sudo apt-get install -y jq
@@ -173,11 +178,6 @@ jobs:
       TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
       - name: Initialize Telegram Live Message  
         env:  
           ROM_TYPE: ${{ matrix.rom_type }}  
